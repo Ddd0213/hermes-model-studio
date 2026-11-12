@@ -1,0 +1,14 @@
+{
+  "name": "model-studio",
+  "label": "Model Studio",
+  "description": "Custom API providers and per-model settings",
+  "icon": "Cpu",
+  "version": "1.0.2",
+  "tab": {
+    "path": "/model-studio",
+    "position": "after:models"
+  },
+  "entry": "dist/index.js",
+  "css": "dist/style.css",
+  "api": "plugin_api.py"
+}

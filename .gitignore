@@ -1,0 +1,53 @@
+# Runtime credentials, local configuration, and authentication sessions
+.env
+.env.*
+*.env
+.envrc
+config.yaml
+config.yml
+auth.json
+*credentials*.json
+*session*.json
+cookies*.txt
+.netrc
+.npmrc
+
+# Private keys and certificates
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+
+# Runtime data and backups
+.hermes/
+plugin-data/
+backups/
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.sqlite-*
+*.log
+*.bak
+*.bak.*
+*.tar
+*.tar.gz
+*.zip
+
+# Dependencies and local build/test artifacts
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+coverage/
+playwright-report/
+test-results/
+.DS_Store
+.vscode/
+.idea/
+
+# dashboard/dist is intentionally tracked for direct plugin installation.
