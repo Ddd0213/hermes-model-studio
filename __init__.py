@@ -9,5 +9,9 @@ def register(ctx):
         mod = importlib.util.module_from_spec(spec)
         sys.modules["model_studio"] = mod
         spec.loader.exec_module(mod)
-    from model_studio.runtime import middleware
+    from model_studio.runtime import middleware, refresh_runtime, guard_tool
+    from model_studio.shared import start
     ctx.register_middleware("llm_request", middleware)
+    ctx.register_hook("pre_llm_call", refresh_runtime)
+    ctx.register_hook("pre_tool_call", guard_tool)
+    start(ctx)

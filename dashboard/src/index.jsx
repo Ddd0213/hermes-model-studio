@@ -33,6 +33,9 @@ import { translate, resolveLocale } from './i18n.js';
     id: row.id,
     context_length: null,
     max_output_tokens: null,
+    supports_vision: null,
+    supports_tools: null,
+    supports_reasoning: null,
     reasoning_mode: 'auto',
     reasoning_effort: null,
     thinking_budget: null,
@@ -168,7 +171,7 @@ import { translate, resolveLocale } from './i18n.js';
               context_length: v
             })} placeholder={t("留空自动识别")} max={4000000} /></Field><Field label={t("单次最大输出")} hint={t("自动上限：") + nformat(meta.max_output_tokens, locale)}><NumberInput value={m.max_output_tokens} onChange={v => patch({
               max_output_tokens: v
-            })} placeholder={t("留空沿用 Hermes")} max={1000000} /></Field></div><Field label={t("默认思考策略")} hint={meta.supports_reasoning === false ? t("目录标记不支持思考。手动覆盖未经此接口验证。") : t("只对这个服务和模型生效；不改变其他模型。")}><select value={m.reasoning_mode} onChange={e => patch({
+            })} placeholder={t("留空沿用 Hermes")} max={1000000} /></Field></div><fieldset className="hms-capabilities"><legend>{t("模型能力")}</legend><div className="hms-form-grid">{[['supports_vision', '图片识别'], ['supports_tools', '工具调用'], ['supports_reasoning', '思考能力']].map(([key, label]) => <Field key={key} label={t(label)} hint={t("自动识别：") + t(meta[key] === true ? '支持' : meta[key] === false ? '不支持' : '未知')}><select aria-label={t(label)} value={m[key] === true ? 'yes' : m[key] === false ? 'no' : 'auto'} onChange={e => patch({[key]: e.target.value === 'auto' ? null : e.target.value === 'yes'})}><option value="auto">{t("自动")}</option><option value="yes">{t("支持")}</option><option value="no">{t("不支持")}</option></select></Field>)}</div></fieldset><Field label={t("默认思考策略")} hint={meta.supports_reasoning === false ? t("目录标记不支持思考。手动覆盖未经此接口验证。") : t("只对这个服务和模型生效；不改变其他模型。")}><select value={m.reasoning_mode} onChange={e => patch({
             reasoning_mode: e.target.value
           })}><option value="auto">{t("自动 · 沿用 Hermes 原生策略")}</option><option value="off">{t("关闭 · 无法关闭时使用最低可用等级")}</option><option value="omit">{t("不发送 · 使用上游默认值（不代表关闭）")}</option><option value="effort">{t("指定思考等级")}</option>{format === 'anthropic_messages' && <option value="budget">{t("指定思考 Token 预算")}</option>}</select></Field>{m.reasoning_mode === 'effort' && <><Field label={t("默认思考等级")} hint={!levels.length ? t("暂无已知等级，请先勾选你确认支持的选项。") : t("目录信息并非接口实测结果；不支持的等级可能被上游拒绝。")}><select value={m.reasoning_effort || ''} onChange={e => patch({
               reasoning_effort: e.target.value || null
@@ -179,6 +182,9 @@ import { translate, resolveLocale } from './i18n.js';
           })} placeholder={t("例如 8192")} max={1000000} /></Field>}<div className="hms-model-foot"><span>{t("手动填写优先；留空使用自动值。")}</span><Button kind="hms-link" onClick={() => patch({
             context_length: null,
             max_output_tokens: null,
+    supports_vision: null,
+    supports_tools: null,
+    supports_reasoning: null,
             reasoning_mode: 'auto',
             reasoning_effort: null,
             thinking_budget: null,
@@ -397,7 +403,7 @@ import { translate, resolveLocale } from './i18n.js';
         setApiKey('');
         keyRef.current = '';
         await reload(result.id);
-        setNotice('服务已保存。没有自动切换当前默认模型。');
+        setNotice('服务已同步到所有 Bot。已移除的默认模型会使用此服务的默认模型替代。');
       } catch (e) {
         setError(message(e));
         setApiKey('');
@@ -435,7 +441,7 @@ import { translate, resolveLocale } from './i18n.js';
         });
         setDialog(null);
         await reload(type === 'activate' ? form.id : undefined);
-        setNotice(type === 'activate' ? '默认模型已更新。已有会话可能仍沿用原路由；新会话使用新配置。' : '服务已删除。');
+        setNotice(type === 'activate' ? 'Hermes 默认模型已更新。其他 Bot 的默认模型保持不变。' : '服务已删除。');
       } catch (e) {
         setDialog(null);
         setError(message(e));
@@ -447,13 +453,13 @@ import { translate, resolveLocale } from './i18n.js';
     const selected = form.models.filter(m => m.id.toLowerCase().includes(selectedSearch.toLowerCase()));
     const disabled = Boolean(busy) || form.editable === false;
     const addressChanged = form.has_key && (form.base_url !== baseline.base_url || form.api_mode !== baseline.api_mode);
-    return <main className="hms-root"><header className="hms-heading"><div><div className="hms-eyebrow">HERMES / MODEL STUDIO</div><h1>{t("模型服务")}</h1></div><div className="hms-secure-badge"><Icon name="shield" />{t("密钥仅保存在服务器")}</div></header><div className="hms-statusbar"><span className="hms-dot" /><span>{t("当前默认")}</span><strong>{data?.current?.model || t("读取中…")}</strong><span className="hms-status-provider">{data?.current?.provider}</span><Button kind="hms-link" disabled={!!busy} onClick={() => askChange(() => reload(form.id))}><Icon name="refresh" size={14} />{t("刷新配置")}</Button></div>{error && <div className="hms-banner hms-error" role="alert">{t(error)}<button aria-label={t("关闭错误提示")} onClick={() => setError('')}><Icon name="close" size={16} /></button></div>}{notice && <div className="hms-banner hms-success" role="status"><Icon name="check" />{t(notice)}</div>}{busy === 'load' && !data ? <div className="hms-initial"><span className="hms-spinner" />{t("正在读取服务配置…")}</div> : <div className="hms-layout"><aside className="hms-sidebar"><div className="hms-sidebar-title"><h2>{t("我的服务 ")}<span>{data?.providers?.length || 0}</span></h2><button className="hms-icon-btn" aria-label={t("新增服务")} disabled={!!busy} onClick={() => askChange(() => install(null))}><Icon name="plus" /></button></div><div className="hms-service-list">{data?.providers?.map(p => <button key={p.id} disabled={!!busy} className={'hms-service ' + (form.id === p.id ? 'selected' : '')} onClick={() => askChange(() => install(p))}><span className="hms-service-icon"><Icon name="server" /></span><span className="hms-service-info"><strong>{p.name}</strong><small>{(() => {
+    return <main className="hms-root"><header className="hms-heading"><div><div className="hms-eyebrow">HERMES / MODEL STUDIO</div><h1>{t("模型服务")}</h1></div><div className="hms-secure-badge"><Icon name="shield" />{t("密钥仅保存在服务器")}</div></header><div className="hms-statusbar"><span className="hms-dot" /><span>{t("当前默认")}</span><strong>{data?.current?.model || t("读取中…")}</strong><span className="hms-status-provider">{data?.current?.provider}</span><Button kind="hms-link" disabled={!!busy} onClick={() => askChange(() => reload(form.id))}><Icon name="refresh" size={14} />{t("刷新配置")}</Button></div>{error && <div className="hms-banner hms-error" role="alert">{t(error)}<button aria-label={t("关闭错误提示")} onClick={() => setError('')}><Icon name="close" size={16} /></button></div>}{notice && <div className="hms-banner hms-success" role="status"><Icon name="check" />{t(notice)}</div>}{busy === 'load' && !data ? <div className="hms-initial"><span className="hms-spinner" />{t("正在读取服务配置…")}</div> : <><div className={'hms-banner ' + (data?.sharing?.ok ? 'hms-success' : 'hms-error')} role="status">{data?.sharing?.ok ? <><Icon name="check" />{t("已同步所有 Bot")} · {data.sharing.profiles.length} {t("个 Bot（包含以后新建的 Bot）")}</> : t(data?.sharing?.error || '正在同步所有 Bot…')}</div><div className="hms-layout"><aside className="hms-sidebar"><div className="hms-sidebar-title"><h2>{t("我的服务 ")}<span>{data?.providers?.length || 0}</span></h2><button className="hms-icon-btn" aria-label={t("新增服务")} disabled={!!busy} onClick={() => askChange(() => install(null))}><Icon name="plus" /></button></div><div className="hms-service-list">{data?.providers?.map(p => <button key={p.id} disabled={!!busy} className={'hms-service ' + (form.id === p.id ? 'selected' : '')} onClick={() => askChange(() => install(p))}><span className="hms-service-icon"><Icon name="server" /></span><span className="hms-service-info"><strong>{p.name}</strong><small>{(() => {
                     try {
                       return new URL(p.base_url).hostname;
                     } catch {
                       return t("接口地址");
                     }
-                  })()}</small></span>{p.is_current && <span className="hms-current-dot" title={t("当前默认服务")} />}</button>)}</div><Button kind={'hms-new ' + (!form.id ? 'active' : '')} disabled={!!busy} onClick={() => askChange(() => install(null))}><Icon name="plus" />{t("添加自定义服务")}</Button><div className="hms-sidebar-note"><Icon name="shield" size={17} /><p>{t("原有手机连接与推送接口保持不变。只有明确切换默认模型，才会改变共享配置。")}</p></div></aside><section className="hms-editor"><div className="hms-section-heading"><div><h2>{form.id ? t("编辑服务") : t("新建服务")}</h2><p>{form.id ? t("修改服务连接与已添加的模型。") : t("支持 OpenAI 与 Anthropic 兼容的公网 HTTPS 接口。")}</p></div>{dirty && <span className="hms-draft-badge">{t("未保存")}</span>}</div>{form.warning && <div className="hms-inline-note">{t(form.warning)}</div>}<fieldset disabled={disabled} className="hms-connection"><div className="hms-form-grid"><Field label={t("服务名称")}><input maxLength="100" value={form.name} placeholder={t("例如：我的中转服务")} onChange={e => update({
+                  })()}</small></span>{p.is_current && <span className="hms-current-dot" title={t("当前默认服务")} />}</button>)}</div><Button kind={'hms-new ' + (!form.id ? 'active' : '')} disabled={!!busy} onClick={() => askChange(() => install(null))}><Icon name="plus" />{t("添加自定义服务")}</Button><div className="hms-sidebar-note"><Icon name="shield" size={17} /><p>{t("供应商、模型和密钥共享给所有 Bot，新建 Bot 也会自动同步。")}</p></div></aside><section className="hms-editor"><div className="hms-section-heading"><div><h2>{form.id ? t("编辑服务") : t("新建服务")}</h2><p>{form.id ? t("修改服务连接与已添加的模型。") : t("支持 OpenAI 与 Anthropic 兼容的公网 HTTPS 接口。")}</p></div>{dirty && <span className="hms-draft-badge">{t("未保存")}</span>}</div>{form.warning && <div className="hms-inline-note">{t(form.warning)}</div>}<fieldset disabled={disabled} className="hms-connection"><div className="hms-form-grid"><Field label={t("服务名称")}><input maxLength="100" value={form.name} placeholder={t("例如：我的中转服务")} onChange={e => update({
                   name: e.target.value
                 })} /></Field><Field label={t("接口格式")}><select value={form.api_mode} onChange={e => update({
                   api_mode: e.target.value
@@ -468,16 +474,16 @@ import { translate, resolveLocale } from './i18n.js';
                     e.preventDefault();
                     addManual();
                   }
-                }} disabled={disabled} placeholder={t("输入模型 ID，例如 my-model-v2")} /><Button disabled={disabled || !manual.trim()} onClick={addManual}><Icon name="plus" size={16} />{t("添加")}</Button></div></section></div><div className="hms-footer"><Field label={t("此服务的默认模型")} hint={t("保存仅记录服务；点击“设为全局默认”才改变 Hermes 默认路由。")}><select disabled={disabled || !form.models.length} value={form.default_model} onChange={e => update({
+                }} disabled={disabled} placeholder={t("输入模型 ID，例如 my-model-v2")} /><Button disabled={disabled || !manual.trim()} onClick={addManual}><Icon name="plus" size={16} />{t("添加")}</Button></div></section></div><div className="hms-footer"><Field label={t("此服务的默认模型")} hint={t("保存会同步所有 Bot；各 Bot 保留自己的默认模型。若原模型已移除，则使用这里选定的模型。")}><select disabled={disabled || !form.models.length} value={form.default_model} onChange={e => update({
                 default_model: e.target.value
               })}><option value="">{t("请选择模型")}</option>{form.models.map(m => <option key={m.id} value={m.id}>{m.id}</option>)}</select></Field><div className="hms-footer-actions"><Button kind="hms-danger-link" disabled={disabled || !form.id || form.is_current} onClick={() => setDialog({
                 type: 'delete'
               })}><Icon name="trash" size={15} />{t("删除服务")}</Button><span className="hms-action-spacer" /><Button disabled={disabled || !form.id || dirty || !form.default_model} onClick={() => setDialog({
                 type: 'activate'
-              })}>{t("设为全局默认")}</Button><Button kind="hms-primary" disabled={disabled || !dirty} busy={busy === 'save'} onClick={save}><Icon name="check" size={16} />{t("保存服务")}</Button></div></div><div className="hms-bottom-note"><Icon name="shield" size={15} /><span>{t("密钥不回显 · 能力来源可追溯 · 请求参数只对本页管理的模型生效。上下文修改用于新会话；已有会话可能保留原设置。")}</span></div></section></div>}{dialog?.type === 'discard' && <Dialog title={t("放弃未保存的修改？")} confirm={t("放弃并继续")} onClose={() => setDialog(null)} onConfirm={() => {
+              })}>{t("设为 Hermes 默认")}</Button><Button kind="hms-primary" disabled={disabled || !dirty} busy={busy === 'save'} onClick={save}><Icon name="check" size={16} />{t("保存服务")}</Button></div></div><div className="hms-bottom-note"><Icon name="shield" size={15} /><span>{t("密钥保存后不回显。模型与密钥修改在后续对话轮次生效，正在生成的回复继续完成。")}</span></div></section></div></>}{dialog?.type === 'discard' && <Dialog title={t("放弃未保存的修改？")} confirm={t("放弃并继续")} onClose={() => setDialog(null)} onConfirm={() => {
         dialog.action();
         setDialog(null);
-      }}><p>{t("当前表单和未保存的密钥会被清空。服务器上的配置不变。")}</p></Dialog>}{dialog?.type === 'test' && <Dialog title={t("发送最小模型测试？")} confirm={t("开始测试")} onClose={() => setDialog(null)} onConfirm={test}><p>{t("将向 ")}<strong>{form.default_model}</strong>{t(" 发送一条“Reply with OK.”请求，输出上限 64 Token，未启用任何工具。")}</p><p>{t("这可能产生少量模型费用，不会写入聊天记录。")}</p></Dialog>}{dialog?.type === 'activate' && <Dialog title={t("切换全局默认模型？")} confirm={t("确认切换")} busy={busy === 'activate'} onClose={() => setDialog(null)} onConfirm={() => mutate('activate')}><p>{t("默认模型将切换为 ")}<strong>{form.default_model}</strong>{t("。")}</p><p>{t("这是共享配置，可能影响网页、官方手机端及其他渠道的新会话。已有会话不会强制重置。")}</p></Dialog>}{dialog?.type === 'delete' && <Dialog title={t("删除这个模型服务？")} confirm={t("确认删除")} danger busy={busy === 'delete'} onClose={() => setDialog(null)} onConfirm={() => mutate('delete')}><p>{t("删除 ")}<strong>{form.name}</strong>{t(" 及插件创建的专用密钥。不会删除聊天记录。")}</p><p>{t("正在使用或被其他路由引用的服务，服务器会拒绝删除。")}</p></Dialog>}</main>;
+      }}><p>{t("当前表单和未保存的密钥会被清空。服务器上的配置不变。")}</p></Dialog>}{dialog?.type === 'test' && <Dialog title={t("发送最小模型测试？")} confirm={t("开始测试")} onClose={() => setDialog(null)} onConfirm={test}><p>{t("将向 ")}<strong>{form.default_model}</strong>{t(" 发送一条“Reply with OK.”请求，输出上限 64 Token，未启用任何工具。")}</p><p>{t("这可能产生少量模型费用，不会写入聊天记录。")}</p></Dialog>}{dialog?.type === 'activate' && <Dialog title={t("切换 Hermes 默认模型？")} confirm={t("确认切换")} busy={busy === 'activate'} onClose={() => setDialog(null)} onConfirm={() => mutate('activate')}><p>{t("默认模型将切换为 ")}<strong>{form.default_model}</strong>{t("。")}</p><p>{t("只切换 Hermes Bot 的默认模型；其他 Bot 保留自己的选择。")}</p></Dialog>}{dialog?.type === 'delete' && <Dialog title={t("删除这个模型服务？")} confirm={t("确认删除")} danger busy={busy === 'delete'} onClose={() => setDialog(null)} onConfirm={() => mutate('delete')}><p>{t("删除 ")}<strong>{form.name}</strong>{t(" 及插件创建的专用密钥。不会删除聊天记录。")}</p><p>{t("正在使用或被其他路由引用的服务，服务器会拒绝删除。")}</p></Dialog>}</main>;
   }
   window.__HERMES_PLUGINS__.register('model-studio', App);
 })();

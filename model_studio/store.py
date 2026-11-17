@@ -79,8 +79,8 @@ def write_config(cfg):
     backend = get_config_backend()
     if backend.name != "file" or hc.is_managed():
         raise StudioError("当前安装由管理员或远程配置管理，此插件只读。", 409)
-    hc.atomic_config_replace(hc.get_config_path(), cfg)
-    os.chmod(hc.get_config_path(), 0o600)
+    from .shared import commit
+    commit(cfg)
     hc.invalidate_env_cache()
 
 
@@ -153,6 +153,9 @@ def provider_row(cfg, pid, entry, rev):
                "max_output_tokens": own.get("max_output_tokens"), "reasoning_mode": own.get("reasoning_mode", "auto"),
                "reasoning_effort": own.get("reasoning_effort"), "thinking_budget": own.get("thinking_budget"),
                "effort_levels": own.get("effort_levels", []), "metadata": meta}
+        from .shared import FIELDS, capability
+        for field in FIELDS:
+            row[field] = capability(cfg, pid, mid, raw, field)
         models.append(row)
     info = entry.get("_model_studio") if isinstance(entry.get("_model_studio"), dict) else {}
     fallback = str(entry.get("model") or entry.get("default_model") or (models[0]["id"] if models else ""))
@@ -170,7 +173,8 @@ def list_providers():
         providers = cfg.get("providers") if isinstance(cfg.get("providers"), dict) else {}
         rows = [provider_row(cfg, str(pid), entry, rev) for pid, entry in providers.items() if isinstance(entry, dict) and base_of(entry)]
         cur = current(cfg)
-        return {"providers": rows, "current": {k: cur[k] for k in ["provider", "model"]}, "revision": rev, "runtime_enabled": True}
+        from .shared import status
+        return {"providers": rows, "current": {k: cur[k] for k in ["provider", "model"]}, "revision": rev, "runtime_enabled": True, "sharing": status()}
 
 
 def find(cfg, pid):
@@ -198,6 +202,12 @@ def parse_models(values, api_mode):
             if raw not in (None, "") and positive(raw, maximum) is None:
                 raise StudioError(f"{mid} 的 {key} 必须是范围内的正整数。")
             row[key] = positive(raw, maximum)
+        from .shared import FIELDS
+        for field in FIELDS:
+            val = value.get(field)
+            if val is not None and type(val) is not bool:
+                raise StudioError("模型能力必须选择自动、支持或不支持。")
+            row[field] = val
         mode = value.get("reasoning_mode", "auto")
         if mode not in {"auto", "off", "effort", "budget", "omit"}:
             raise StudioError("思考模式无效。")
@@ -298,6 +308,12 @@ def save_provider(body):
                 raw["context_length"] = effective_context
             else:
                 raw.pop("context_length", None)
+            from .shared import FIELDS
+            for field in FIELDS:
+                if type(row.get(field)) is bool:
+                    raw[field] = row[field]
+                else:
+                    raw.pop(field, None)
             raw["_model_studio"] = {k: v for k, v in row.items() if k != "context_length"}
             raw["_model_studio"]["context_length_override"] = row["context_length"]
             mapped[mid] = raw
@@ -330,7 +346,7 @@ def save_provider(body):
                     main["key_env"] = new_env
                     main.pop("api_key", None)
                 if main.get("default") not in mapped:
-                    raise StudioError("不能移除正在使用的默认模型，请先切换默认模型。", 409)
+                    main["default"] = default
                 # A deliberate per-model context edit must update the active route's mirror.
                 selected_model = main.get("default")
                 old_cfg = old_models.get(selected_model) if isinstance(old_models.get(selected_model), dict) else {}

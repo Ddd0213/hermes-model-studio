@@ -13,11 +13,17 @@ def rule_for(provider, model, base_url, api_mode):
         if not isinstance(entry, dict) or base_of(entry) != str(base_url or '').rstrip('/') or mode_of(entry) != api_mode:
             continue
         raw = models_of(entry).get(model)
-        if not isinstance(raw, dict) or not isinstance(raw.get('_model_studio'), dict):
+        if not isinstance(raw, dict):
+            continue
+        rule = dict(raw.get('_model_studio') or {})
+        for field in ("supports_vision", "supports_tools", "supports_reasoning"):
+            if field not in rule and type(raw.get(field)) is bool:
+                rule[field] = raw[field]
+        if not rule:
             continue
         if provider in {pid, 'custom:' + pid}:
-            return raw['_model_studio']
-        candidates.append(raw['_model_studio'])
+            return rule
+        candidates.append(rule)
     # Runtime normalizes a custom route's provider to 'custom'; URL must be unambiguous.
     return candidates[0] if provider == 'custom' and len(candidates) == 1 else None
 
@@ -61,13 +67,18 @@ def _responses_level(model, rule, requested):
 
 def transform(request, rule, model, api_mode):
     out = copy.deepcopy(request)
+    if rule.get("supports_tools") is False:
+        for key in ("tools", "tool_choice", "parallel_tool_calls", "functions", "function_call"):
+            out.pop(key, None)
+            if isinstance(out.get("extra_body"), dict):
+                out["extra_body"].pop(key, None)
     cap = rule.get("max_output_tokens")
     cap = cap if type(cap) is int and 0 < cap <= 1_000_000 else None
     if cap:
         key = "max_output_tokens" if api_mode == "codex_responses" else ("max_completion_tokens" if "max_completion_tokens" in out else "max_tokens")
         original = out.get(key)
         out[key] = min(original, cap) if type(original) is int and original > 0 else cap
-    mode = rule.get("reasoning_mode", "auto")
+    mode = "omit" if rule.get("supports_reasoning") is False else rule.get("reasoning_mode", "auto")
     if mode == "auto":
         return _bounded_anthropic_thinking(out, out.get("max_tokens"), model) if cap and api_mode == "anthropic_messages" else out
     extras = dict(out.get("extra_body") or {})
@@ -128,3 +139,79 @@ def middleware(request, provider='', model='', base_url='', api_mode='', **kwarg
     if rule is None:
         return None
     return {'request': transform(request, rule, model, api_mode), 'source': 'model-studio', 'reason': 'explicit model parameters'}
+
+
+def selected_entry(agent, cfg):
+    """Prefer stable provider identity; transport-normalized custom uses an exact URL."""
+    providers = cfg.get("providers") or {}
+    requested = str(getattr(agent, "requested_provider", "") or "")
+    remembered = getattr(agent, "_model_studio_provider", "")
+    base = str(getattr(agent, "base_url", "") or "").rstrip("/")
+    from . import shared
+    from hermes_constants import get_hermes_home
+    history = shared.read_state(get_hermes_home()).get("route_history", {})
+    for key in (remembered, requested, requested.removeprefix("custom:")):
+        entry = providers.get(key)
+        if isinstance(entry, dict) and (entry.get("_model_studio") or {}).get("shared"):
+            if key == "custom" and base != base_of(entry) and base not in history.get(key, []) and not remembered: continue
+            return key, entry
+    candidates = [(pid,e) for pid,e in providers.items() if isinstance(e,dict)
+                  and (e.get("_model_studio") or {}).get("shared") and base_of(e)==base]
+    if len(candidates)==1: return candidates[0]
+    old_matches = [pid for pid, urls in history.items() if base in urls]
+    if len(old_matches)==1:
+        pid=old_matches[0]
+        return pid, providers.get(pid)
+    if remembered or (requested and requested in history):
+        pid=remembered or requested
+        return pid, providers.get(pid)
+    return None,None
+
+
+def refresh_runtime(**kwargs):
+    """Official pre_llm_call hook: refresh the live client at a turn boundary, never log keys."""
+    from agent.subagent_lifecycle import get_active_subagent_parent
+    from . import shared, store
+    agent = get_active_subagent_parent()
+    if agent is None: return None
+    try:
+        cfg = store.raw_config()
+        pid, entry = selected_entry(agent,cfg)
+        if not entry:
+            if pid or getattr(agent,"_model_studio_provider",None):
+                return {"action":"block","message":"Model Studio: this provider was removed. Select an available model."}
+            return None
+        models = models_of(entry)
+        old_model = str(getattr(agent,"model","") or "")
+        model = old_model if old_model in models else entry.get("default_model") or next(iter(models),"")
+        if not model: return {"action":"block","message":"Model Studio: this provider has no available models."}
+        key, _ = store.credentials(entry)
+        base, mode = base_of(entry), mode_of(entry)
+        import hashlib, json
+        stamp = hashlib.sha256(json.dumps([pid,model,entry,key],sort_keys=True).encode()).digest()
+        seen = getattr(agent,"_model_studio_stamp",None)
+        route_changed = (model != old_model or base != str(getattr(agent,"base_url","") or "").rstrip("/")
+                         or mode != getattr(agent,"api_mode","") or key != getattr(agent,"api_key", ""))
+        if route_changed or (seen is not None and seen != stamp):
+            agent.switch_model(new_model=model,new_provider="custom",api_key=key,
+                               base_url=base,api_mode=mode)
+            agent.requested_provider = pid
+        agent._model_studio_provider = pid
+        agent._model_studio_stamp = stamp
+    except Exception:
+        # A failed refresh must not silently send an obsolete key or removed model.
+        return {"action":"block","message":"Model Studio: model settings changed but could not be refreshed. Retry or select the model again."}
+    return None
+
+
+def guard_tool(**kwargs):
+    from agent.subagent_lifecycle import get_active_subagent_parent
+    from . import store
+    agent = get_active_subagent_parent()
+    if agent is None: return None
+    pid, entry = selected_entry(agent, store.raw_config())
+    if entry:
+        raw = models_of(entry).get(str(getattr(agent,"model", "")), {})
+        if isinstance(raw,dict) and raw.get("supports_tools") is False:
+            return {"action":"block","message":"Tool calling is disabled for this model in Model Studio."}
+    return None

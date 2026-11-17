@@ -19,7 +19,7 @@ if 'model_studio' not in sys.modules:
     mod = importlib.util.module_from_spec(spec)
     sys.modules['model_studio'] = mod
     spec.loader.exec_module(mod)
-from model_studio import store, metadata
+from model_studio import store, metadata, shared
 from model_studio.security import StudioError, request_json
 
 router = APIRouter()
@@ -36,7 +36,7 @@ def guard(request, write=False):
     if not gated or not principal:
         raise StudioError('此插件要求启用官方 Dashboard 登录认证。', 401)
     if request.query_params.get('profile') not in (None, '', 'default'):
-        raise StudioError('第一版仅管理默认配置；其他配置保持不变。', 409)
+        raise StudioError('此页面统一管理所有 Bot，请从主 Dashboard 打开。', 409)
     if not write:
         return
     if request.headers.get('x-hermes-model-studio') != '1':
@@ -78,7 +78,7 @@ def limited(request, action):
         calls.append(now)
 
 
-def perform(action, body):
+def _perform(action, body):
     if action == 'save':
         row = store.save_provider(body)
         return {'ok': True, 'id': row['id'], 'provider': row}
@@ -124,11 +124,18 @@ def perform(action, body):
         _SLOTS.release()
 
 
+def perform(action, body):
+    with shared.scope(shared.ROOT):
+        return _perform(action, body)
+
+
 @router.get('/providers')
 def providers(request: Request):
     try:
         guard(request)
-        return response(store.list_providers())
+        with shared.scope(shared.ROOT):
+            shared.reconcile()
+            return response(store.list_providers())
     except StudioError as exc:
         return response({'detail': exc.message}, exc.status)
     except Exception:

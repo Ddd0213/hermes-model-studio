@@ -2,3 +2,5 @@
 
 /* Hermes foreground is a transparent layer; use its semantic text token. */
 .hms-root input,.hms-root select{caret-color:var(--color-foreground,var(--midground,#e8edf4))}.hms-root select option{color:var(--color-foreground,var(--midground,#e8edf4));background:var(--background-base,#111827)}
+
+.hms-capabilities{border:0;padding:0;margin:16px 0}.hms-capabilities legend{font-weight:600;margin-bottom:10px}.hms-capabilities .hms-form-grid{grid-template-columns:repeat(auto-fit,minmax(130px,1fr))}

@@ -1,8 +1,10 @@
 name: model-studio
-version: 1.0.2
+version: 1.1.0
 description: Secure custom API and per-model settings for the official Dashboard.
 provides_tools: []
-provides_hooks: []
+provides_hooks:
+  - pre_llm_call
+  - pre_tool_call
 provides_middleware:
   - llm_request
 requires_hermes: ">=0.23.1"

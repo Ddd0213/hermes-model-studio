@@ -42,13 +42,20 @@ def normalize_metadata(raw, source):
     output = next((positive(raw.get(k), 1_000_000) for k in ["max_output_tokens", "max_tokens", "maxTokens", "outputTokenLimit"] if positive(raw.get(k), 1_000_000)), None) or positive(limit.get("output"), 1_000_000)
     reasoning = raw.get("supports_reasoning", raw.get("reasoning"))
     reasoning = reasoning if isinstance(reasoning, bool) else None
+    vision = raw.get("supports_vision", raw.get("vision"))
+    modalities = raw.get("modalities") if isinstance(raw.get("modalities"), dict) else {}
+    if type(vision) is not bool and isinstance(modalities.get("input"), list):
+        vision = "image" in modalities["input"]
+    vision = vision if type(vision) is bool else None
+    tools = raw.get("supports_tools", raw.get("tool_call"))
+    tools = tools if type(tools) is bool else None
     levels = effort_values(raw)
     raw_levels = raw.get("effort_levels", raw.get("reasoning_effort_values", []))
     if not levels and isinstance(raw_levels, list):
         levels = list(dict.fromkeys(v for v in raw_levels if isinstance(v, str) and re.fullmatch(r"[a-z][a-z0-9_-]{0,23}", v)))[:8]
-    return {"context_length": context, "max_output_tokens": output, "supports_reasoning": reasoning,
+    return {"context_length": context, "max_output_tokens": output, "supports_reasoning": reasoning, "supports_vision": vision, "supports_tools": tools,
             "effort_levels": levels, "family": str(raw.get("family") or "")[:80],
-            "source": source if context or output or reasoning is not None or levels else "unknown"}
+            "source": source if context or output or reasoning is not None or vision is not None or tools is not None or levels else "unknown"}
 
 
 def catalog():
@@ -101,10 +108,10 @@ def catalog_metadata(mid, base_url):
     if not candidates:
         return normalize_metadata({}, "unknown")
     result = {"source": "catalog"}
-    for key in ["context_length", "max_output_tokens", "supports_reasoning", "effort_levels", "family"]:
+    for key in ["context_length", "max_output_tokens", "supports_reasoning", "supports_vision", "supports_tools", "effort_levels", "family"]:
         vals = [x.get(key) for x in candidates if x.get(key) not in (None, "", [])]
         result[key] = vals[0] if vals and all(v == vals[0] for v in vals) else ([] if key == "effort_levels" else None)
-    if not any(result.get(k) is not None for k in ["context_length", "max_output_tokens", "supports_reasoning"]) and not result["effort_levels"]:
+    if not any(result.get(k) is not None for k in ["context_length", "max_output_tokens", "supports_reasoning", "supports_vision", "supports_tools"]) and not result["effort_levels"]:
         result["source"] = "unknown"
     return result
 

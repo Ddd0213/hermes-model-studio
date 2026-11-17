@@ -3,7 +3,7 @@
   "label": "Model Studio",
   "description": "Custom API providers and per-model settings",
   "icon": "Cpu",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "tab": {
     "path": "/model-studio",
     "position": "after:models"
