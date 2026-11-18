@@ -122,6 +122,46 @@ def sync_capabilities(cfg, providers, previous):
     if not section: overrides.pop("custom", None)
     if not overrides: cfg.pop("model_overrides", None)
 
+def check_removal_routes(cfg, pid, entry):
+    """Check actual inference routes in one bot, including legacy and named routes."""
+    from .store import base_of
+
+    def check(route):
+        if not isinstance(route, dict):
+            return
+        provider = route.get("provider")
+        base = str(route.get("base_url") or "").rstrip("/")
+        if provider == "custom" and base:
+            referenced = base == base_of(entry)
+        else:
+            referenced = provider in (pid, "custom:" + pid)
+        if referenced:
+            raise StudioError("某个 Bot 仍在使用此供应商，请先为该 Bot 选择其他供应商。", 409)
+
+    def check_chain(chain):
+        for route in chain if isinstance(chain, list) else [chain]:
+            check(route)
+
+    check(cfg.get("model"))
+    for section in ("auxiliary", "model_aliases"):
+        routes = cfg.get(section)
+        if isinstance(routes, dict):
+            for route in routes.values():
+                check(route)
+    moa = cfg.get("moa") or {}
+    presets = moa.get("presets") if isinstance(moa, dict) else None
+    if isinstance(presets, dict):
+        for preset in presets.values():
+            if isinstance(preset, dict):
+                check(preset.get("aggregator"))
+                check_chain(preset.get("reference_models"))
+    delegation = cfg.get("delegation") or {}
+    if isinstance(delegation, dict):
+        check(delegation)
+        check_chain(delegation.get("fallback_providers"))
+    for section in ("fallback_providers", "fallback_model"):
+        check_chain(cfg.get(section))
+
 def repair_route(route, pid, old, new, *, main=False):
     from .store import base_of, mode_of, models_of
     if not isinstance(route, dict): return
@@ -156,6 +196,15 @@ def repair_route(route, pid, old, new, *, main=False):
 def plan_profile(home, current, source, source_cfg, source_env, original=None):
     from .store import models_of, base_of
     cfg = copy.deepcopy(current)
+    # Photos belong to the model selected in the conversation, not an auxiliary
+    # describer. Share the explicit native-input policy with existing and future
+    # bots; it changes image routing only and never enables the vision toolset.
+    cfg.setdefault("agent", {})["image_input_mode"] = "native"
+    disabled = cfg["agent"].setdefault("disabled_toolsets", [])
+    if not isinstance(disabled, list):
+        raise StudioError("Bot 的禁用工具集配置无效，请检查 disabled_toolsets。", 409)
+    if "vision" not in disabled:
+        disabled.append("vision")
     state = read_state(home)
     owned = set(state.get("providers", []))
     providers = cfg.setdefault("providers", {})
@@ -217,7 +266,7 @@ def _atomic_bytes(p, value, mode=0o600):
     finally:
         if tmp.exists(): tmp.unlink()
 
-def commit(source_cfg=None):
+def commit(source_cfg=None, *, removed_provider=None):
     """Caller holds store.mutation() in root scope. Preflight all profiles; rollback failures in memory."""
     from .store import models_of
     source_cfg = copy.deepcopy(source_cfg if source_cfg is not None else read_config(ROOT))
@@ -235,8 +284,13 @@ def commit(source_cfg=None):
     plans = []
     for name, home in roster:
         current = source_cfg if home == ROOT else read_config(home)
+        original = read_config(home) if home == ROOT else current
+        if removed_provider is not None:
+            pid, source_entry = removed_provider
+            local_entry = (original.get("providers") or {}).get(pid) or source_entry
+            check_removal_routes(original, pid, local_entry)
         new_cfg, env, previous, state = plan_profile(home, current, source, source_cfg, source_env,
-                                                        original=read_config(home) if home == ROOT else None)
+                                                      original=original)
         link = home / "plugins/model-studio"
         if home != ROOT and link.exists() and link.resolve() != ROOT / "plugins/model-studio":
             raise StudioError("某个 Bot 已安装独立的 Model Studio，请先统一插件来源。", 409)

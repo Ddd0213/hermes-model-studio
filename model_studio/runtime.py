@@ -142,30 +142,51 @@ def middleware(request, provider='', model='', base_url='', api_mode='', **kwarg
 
 
 def selected_entry(agent, cfg):
-    """Prefer stable provider identity; transport-normalized custom uses an exact URL."""
-    providers = cfg.get("providers") or {}
-    requested = str(getattr(agent, "requested_provider", "") or "")
-    remembered = getattr(agent, "_model_studio_provider", "")
-    base = str(getattr(agent, "base_url", "") or "").rstrip("/")
+    """Resolve the live Hermes route. A prior turn cannot select this turn's provider."""
     from . import shared
     from hermes_constants import get_hermes_home
-    history = shared.read_state(get_hermes_home()).get("route_history", {})
-    for key in (remembered, requested, requested.removeprefix("custom:")):
-        entry = providers.get(key)
-        if isinstance(entry, dict) and (entry.get("_model_studio") or {}).get("shared"):
-            if key == "custom" and base != base_of(entry) and base not in history.get(key, []) and not remembered: continue
-            return key, entry
-    candidates = [(pid,e) for pid,e in providers.items() if isinstance(e,dict)
-                  and (e.get("_model_studio") or {}).get("shared") and base_of(e)==base]
-    if len(candidates)==1: return candidates[0]
-    old_matches = [pid for pid, urls in history.items() if base in urls]
-    if len(old_matches)==1:
-        pid=old_matches[0]
-        return pid, providers.get(pid)
-    if remembered or (requested and requested in history):
-        pid=remembered or requested
-        return pid, providers.get(pid)
-    return None,None
+
+    providers = cfg.get("providers") or {}
+    managed = {pid: entry for pid, entry in providers.items()
+               if isinstance(entry, dict) and (entry.get("_model_studio") or {}).get("shared")}
+    requested = str(getattr(agent, "requested_provider", "") or "")
+    transport = str(getattr(agent, "provider", "") or "")
+    identity = transport if requested in ("", "auto") else requested
+    if identity == "custom" and transport not in ("", "auto", "custom"):
+        identity = transport
+    base = str(getattr(agent, "base_url", "") or "").rstrip("/")
+
+    # Hermes uses bare "custom" for distinct endpoints. A qualified name, including
+    # "custom:custom", identifies a specific provider even after its URL changes.
+    if identity not in ("", "auto", "custom"):
+        pid = identity.removeprefix("custom:")
+        if pid in managed:
+            return pid, managed[pid]
+        if pid in providers:
+            return None, None  # A current provider outside Model Studio.
+        history = shared.read_state(get_hermes_home()).get("route_history", {})
+        return (pid, None) if pid in history else (None, None)
+
+    if not base:
+        return None, None
+    matches = [pid for pid, entry in managed.items() if base_of(entry) == base]
+    if not matches:
+        # A resumed conversation may still hold the previous URL of a renamed or removed route.
+        history = shared.read_state(get_hermes_home()).get("route_history", {})
+        matches = [pid for pid, urls in history.items() if base in urls]
+    if len(matches) > 1:
+        # Different named providers can serve the same URL. Hermes may only retain
+        # the generic custom transport, so use the current model when it is unique.
+        model = getattr(agent, "model", "")
+        owners = [pid for pid in matches if pid in managed and model in models_of(managed[pid])]
+        if len(owners) == 1 and all(pid in managed for pid in matches):
+            matches = owners
+    if len(matches) == 1:
+        pid = matches[0]
+        return pid, managed.get(pid)
+    if matches:
+        raise ValueError("Ambiguous Model Studio endpoint; select a named provider")
+    return None, None
 
 
 def refresh_runtime(**kwargs):
@@ -178,8 +199,10 @@ def refresh_runtime(**kwargs):
         cfg = store.raw_config()
         pid, entry = selected_entry(agent,cfg)
         if not entry:
-            if pid or getattr(agent,"_model_studio_provider",None):
+            if pid:
                 return {"action":"block","message":"Model Studio: this provider was removed. Select an available model."}
+            agent._model_studio_provider = None
+            agent._model_studio_stamp = None
             return None
         models = models_of(entry)
         old_model = str(getattr(agent,"model","") or "")
@@ -192,7 +215,8 @@ def refresh_runtime(**kwargs):
         seen = getattr(agent,"_model_studio_stamp",None)
         route_changed = (model != old_model or base != str(getattr(agent,"base_url","") or "").rstrip("/")
                          or mode != getattr(agent,"api_mode","") or key != getattr(agent,"api_key", ""))
-        if route_changed or (seen is not None and seen != stamp):
+        same_provider = getattr(agent, "_model_studio_provider", None) == pid
+        if route_changed or (same_provider and seen is not None and seen != stamp):
             agent.switch_model(new_model=model,new_provider="custom",api_key=key,
                                base_url=base,api_mode=mode)
             agent.requested_provider = pid
@@ -209,7 +233,10 @@ def guard_tool(**kwargs):
     from . import store
     agent = get_active_subagent_parent()
     if agent is None: return None
-    pid, entry = selected_entry(agent, store.raw_config())
+    try:
+        pid, entry = selected_entry(agent, store.raw_config())
+    except ValueError:
+        return {"action": "block", "message": "Model Studio: select the named provider for this endpoint."}
     if entry:
         raw = models_of(entry).get(str(getattr(agent,"model", "")), {})
         if isinstance(raw,dict) and raw.get("supports_tools") is False:

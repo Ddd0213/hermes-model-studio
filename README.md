@@ -59,9 +59,9 @@ Installing this GitHub repository does not require registration in the official 
 
 Fetching a model list sends a model-list request, not inference. **Test connection** asks for confirmation before sending one `Reply with OK.` request with a 64-token output limit and no tools. The upstream provider may charge for that request.
 
-Saving a provider preserves each bot's selected model while that model remains available. If a selected model is removed, the bot falls back to that provider's default model. Provider, key, and model-setting changes apply to subsequent conversation turns; a reply already being generated finishes normally. A provider still referenced by any bot or configured route cannot be deleted.
+Saving a provider preserves each bot's selected model while that model remains available. If a selected model is removed, the bot falls back to that provider's default model. Provider, key, and model-setting changes apply to subsequent conversation turns; a reply already being generated finishes normally. Switching providers in an existing conversation uses the newly selected route on the next turn.
 
-Capability overrides describe what the upstream model supports; they cannot add capabilities to a model. Marking tool calling as unsupported removes tool declarations from requests and blocks tool execution. Marking reasoning as unsupported omits reasoning fields. Image input uses Hermes' native model capability settings and does not enable additional tools.
+Capability overrides describe what the upstream model supports; they cannot add capabilities to a model. Marking tool calling as unsupported removes tool declarations from requests and blocks tool execution. Marking reasoning as unsupported omits reasoning fields. During synchronization, Model Studio sets `agent.image_input_mode` to `native` and adds `vision` to `agent.disabled_toolsets` for every bot, including new ones. Hermes still handles image preparation and provider rejection.
 
 ## Configuration and key storage
 
@@ -72,7 +72,7 @@ The plugin uses Hermes' native configuration and secret lifecycle:
 - Saved keys are not returned by the plugin API. The browser receives only a `has_key` state. Newly typed keys are visible while entering them and cleared after saving.
 - Existing extra authentication headers remain on the server. Changing the URL or API format of such a provider requires creating a new provider.
 - The plugin does not create, delete, or migrate chat history or mobile/push credentials.
-- Bots retain their memory, tool configuration, and unrelated settings. Synchronization checks for changes every three seconds while the main plugin runtime is active; saving through the Dashboard synchronizes immediately.
+- Bots retain their memory and their other tool settings. Synchronization checks for changes every three seconds while the main plugin runtime is active; saving through the Dashboard synchronizes immediately.
 
 The backend checks authentication, request origins, configuration revisions, response sizes, and action rate limits. Its outbound checks validate every DNS result and pin the checked public address for TLS connections. This does not replace Hermes' own network behavior when conversations invoke models.
 
@@ -83,9 +83,9 @@ This repository contains plugin code and build files only. It does not include a
 - Version 1.1.0 shares supported custom providers across all bots in one Hermes home. Per-bot exclusions are not available. Built-in providers and providers using `key_cmd` are outside this shared catalog.
 - A bot with a conflicting provider ID at a different URL or a separate Model Studio installation must be reconciled before synchronization can proceed. The plugin reports the conflict instead of overwriting it.
 - The sidebar label is fixed as **Model Studio**; page content follows the official language selector.
-- Model discovery is limited to 200 entries. Catalog matches describe known model capabilities and do not prove that a particular upstream endpoint supports them.
+- Model discovery is limited to 200 entries. Providers already configured with more than 200 models are read-only in Model Studio so saving cannot drop models outside the displayed list. Catalog matches describe known model capabilities and do not prove that a particular upstream endpoint supports them.
 - The plugin uses the official Dashboard extension, `llm_request` middleware, and `pre_llm_call` / `pre_tool_call` hooks. Some parameter mapping, runtime refresh, and native configuration validation use Hermes internal helpers, so compatibility should be checked after upgrading Hermes.
-- A provider that is active or still referenced by another route cannot be deleted. Deleting an unused provider may also remove an unreferenced key created by this plugin.
+- Deletion checks the configured main, auxiliary, fallback and delegation routes across bots. A provider’s generated capability records alone do not block deletion. Check shorthand aliases in `model.aliases` before removing their provider. Deleting an unused provider may also remove an unreferenced key created by this plugin.
 
 ## Development
 

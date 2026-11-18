@@ -25,6 +25,10 @@ MODES = {"chat_completions", "codex_responses", "anthropic_messages"}
 EFFORTS = {"none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"}
 
 
+MAX_EDITABLE_MODELS = 200
+CATALOG_TOO_LARGE = "此服务已配置超过 200 个模型。这里只显示前 200 个，编辑已禁用，以保留完整列表。"
+
+
 def text(value, limit, name):
     if not isinstance(value, str) or len(value.strip()) > limit or any(ord(c) < 32 and c not in "\n\t" for c in value):
         raise StudioError(f"{name}格式无效或超过长度限制。")
@@ -72,7 +76,7 @@ def mutation():
             os.close(fd)
 
 
-def write_config(cfg):
+def write_config(cfg, *, removed_provider=None):
     # Full raw document has just been read; only explicitly targeted fields changed.
     # Native backend retains comments and refuses invalid/unreadable or managed files.
     from hermes_cli.config_backend import get_config_backend
@@ -80,7 +84,7 @@ def write_config(cfg):
     if backend.name != "file" or hc.is_managed():
         raise StudioError("当前安装由管理员或远程配置管理，此插件只读。", 409)
     from .shared import commit
-    commit(cfg)
+    commit(cfg, removed_provider=removed_provider)
     hc.invalidate_env_cache()
 
 
@@ -143,7 +147,9 @@ def provider_row(cfg, pid, entry, rev):
     except StudioError:
         base, allowed = base_of(entry), False
     models = []
-    for mid, raw in list(models_of(entry).items())[:200]:
+    catalog = models_of(entry)
+    truncated = len(catalog) > MAX_EDITABLE_MODELS
+    for mid, raw in list(catalog.items())[:MAX_EDITABLE_MODELS]:
         if not isinstance(mid, str) or len(mid) > 160:
             continue
         raw = raw if isinstance(raw, dict) else {}
@@ -159,11 +165,18 @@ def provider_row(cfg, pid, entry, rev):
         models.append(row)
     info = entry.get("_model_studio") if isinstance(entry.get("_model_studio"), dict) else {}
     fallback = str(entry.get("model") or entry.get("default_model") or (models[0]["id"] if models else ""))
+    warning = ""
+    if truncated:
+        warning = CATALOG_TOO_LARGE
+    elif not allowed:
+        warning = "此服务格式或认证方式不受本页支持，保留只读。"
+    elif headers:
+        warning = "此服务保留服务器上已有的额外请求头；网页不读取或修改它们。"
     return {"id": pid, "name": str(entry.get("name") or pid)[:160], "note": str(info.get("note") or "")[:400],
             "base_url": base, "api_mode": mode, "has_key": bool(key), "has_extra_headers": bool(headers),
             "default_model": fallback, "models": models, "is_current": active(cfg, pid, entry),
-            "editable": allowed, "revision": rev,
-            "warning": "此服务保留服务器上已有的额外请求头；网页不读取或修改它们。" if headers else ("此服务格式或认证方式不受本页支持，保留只读。" if not allowed else "")}
+            "editable": allowed and not truncated, "revision": rev,
+            "warning": warning}
 
 
 def list_providers():
@@ -187,7 +200,7 @@ def find(cfg, pid):
 
 
 def parse_models(values, api_mode):
-    if not isinstance(values, list) or not 1 <= len(values) <= 200:
+    if not isinstance(values, list) or not 1 <= len(values) <= MAX_EDITABLE_MODELS:
         raise StudioError("请选择 1–200 个模型。")
     result = {}
     for value in values:
@@ -285,6 +298,8 @@ def save_provider(body):
         revision_check(body.get("revision"))
         existing = copy.deepcopy(find(cfg, body["id"])) if body.get("id") else {}
         if existing:
+            if len(models_of(existing)) > MAX_EDITABLE_MODELS:
+                raise StudioError(CATALOG_TOO_LARGE, 409)
             if existing.get("key_cmd") or mode_of(existing) not in MODES:
                 raise StudioError("此服务使用本页不支持的认证或接口格式，保持只读。", 409)
             request_credentials(body)
@@ -404,12 +419,9 @@ def delete_provider(body):
         entry = find(cfg, pid)
         if active(cfg, pid, entry):
             raise StudioError("正在使用的服务不能删除，请先切换默认服务。", 409)
-        # Refuse deletion if another config route references this provider or its secret.
         other = copy.deepcopy(cfg)
         other["providers"].pop(pid)
         key_env = entry.get("key_env")
-        if re.search(r"(?<![A-Za-z0-9_-])" + re.escape(str(pid)) + r"(?![A-Za-z0-9_-])", json.dumps(other, ensure_ascii=False)):
-            raise StudioError("其他模型路由仍在引用此服务，请先解除引用。", 409)
-        write_config(other)
+        write_config(other, removed_provider=(pid, entry))
         if isinstance(key_env, str) and key_env.startswith("HERMES_CUSTOM_STUDIO_") and key_env not in json.dumps(other):
             hc.remove_env_value(key_env)

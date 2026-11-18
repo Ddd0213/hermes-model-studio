@@ -1,5 +1,6 @@
 // UI text only. The official Dashboard owns the selected language.
 const EN = {
+  "此服务已配置超过 200 个模型。这里只显示前 200 个，编辑已禁用，以保留完整列表。": "This provider has more than 200 configured models. Only the first 200 are shown. Editing is disabled to preserve the full list.",
   "模型能力": "Model capabilities",
   "图片识别": "Image input",
   "工具调用": "Tool calling",
